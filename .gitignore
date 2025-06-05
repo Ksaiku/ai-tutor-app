@@ -1,0 +1,12 @@
+# 仮想環境
+.venv/
+
+# Streamlitの秘密情報ファイル
+.streamlit/secrets.toml
+
+# 会話履歴フォルダ
+history/
+
+# Pythonのキャッシュファイル
+__pycache__/
+*.pyc
