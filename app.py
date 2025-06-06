@@ -1,6 +1,3 @@
-# -----------------------------------------------------------------
-# ライブラリのインポート
-# -----------------------------------------------------------------
 import streamlit as st
 import google.generativeai as genai
 import re
@@ -24,14 +21,15 @@ if not os.path.exists("history"):
     os.makedirs("history")
 
 # -----------------------------------------------------------------
-# プロンプトの定義（改善点：MermaidとLaTeXの使用を指示）
+# プロンプトの定義（改善点：Vega-Liteによるグラフ作成を指示）
 # -----------------------------------------------------------------
 PROMPTS = {
     "総合家庭教師": """
 あなたは、生徒の知的好奇心を引き出すのが得意な、非常に優秀な家庭教師です。
 生徒からの質問に対して、必ず以下の形式で回答してください。
-説明が複雑なプロセスを含む場合は、```mermaid```ブロックを使ってフローチャートやシーケンス図を積極的に使用してください。
-数式を記述する場合は、必ず`$$ 数式 $$`の形式でLaTeX記法を使用してください。
+説明が複雑なプロセスを含む場合は、```mermaid```ブロックを使ってフローチャート図を積極的に使用してください。
+数式を記述する場合は、必ず`$$数式$$`の形式でLaTeX記法を使用してください。
+統計データなどを用いてグラフを表示する場合は、必ず```json```ブロックを使ってVega-Lite仕様のJSON形式で記述してください。
 
 ---
 ### 基本的な回答
@@ -164,7 +162,7 @@ with st.sidebar:
 # メイン画面
 # -----------------------------------------------------------------
 st.title("深掘り支援AI")
-st.info(f"現在のモード: **{st.session_state.selected_mode}**")
+st.info(f"現在のモード: **{st.session_state.get('selected_mode', '総合家庭教師')}**")
 
 question = st.session_state.pop("clicked_question", None) or st.chat_input("AI先生に質問してみよう")
 
@@ -172,31 +170,42 @@ if question:
     handle_new_question(question)
     st.rerun()
 
-# --- メインの表示ロジック（改善点：MermaidとLaTeXに対応） ---
+# --- メインの表示ロジック（改善点：グラフ(JSON)に対応） ---
 for i, message in enumerate(st.session_state.messages):
     role = "あなた" if message["role"] == "user" else "AI先生"
     with st.chat_message(role):
         if message["role"] == "model":
             text = message["content"]
             
-            # Mermaid図、LaTeX数式、テキストを分割して表示
-            parts = re.split(r'(```mermaid\n.*?\n```|\$\$.*?\$\$)', text, flags=re.DOTALL)
+            # JSON(グラフ), Mermaid(図), LaTeX(数式), テキストを分割
+            parts = re.split(r'(```json\n.*?\n```|```mermaid\n.*?\n```|\$\$.*?\$\$)', text, flags=re.DOTALL)
             
             for part in parts:
-                if part.strip().startswith('```mermaid'):
-                    # Mermaid部分
+                if not part.strip():
+                    continue
+                
+                if part.strip().startswith('```json'):
+                    # JSON (Vega-Lite グラフ) 部分
+                    try:
+                        json_code = part.strip().lstrip('```json').rstrip('```')
+                        spec = json.loads(json_code)
+                        st.vega_lite_chart(spec)
+                    except json.JSONDecodeError:
+                        st.error("グラフのデータ形式が正しくありません。")
+                        st.code(json_code, language="json")
+                elif part.strip().startswith('```mermaid'):
+                    # Mermaid 部分
                     mermaid_code = part.strip().lstrip('```mermaid').rstrip('```')
-                    st.markdown(f"```{mermaid_code}```") # StreamlitのMarkdownはMermaidを直接レンダリング
+                    st.markdown(f"```{mermaid_code}```")
                 elif part.strip().startswith('$$'):
-                    # LaTeX部分
+                    # LaTeX 部分
                     latex_code = part.strip().strip('$$')
                     st.latex(latex_code)
                 else:
                     # 通常のテキスト部分とボタン表示
                     sub_parts = re.split(r'(### (?:.*?)\n(?:.|\n)*?(?=\n###|\Z))', part)
                     for sub_part in sub_parts:
-                        if not sub_part.strip():
-                            continue
+                        if not sub_part.strip(): continue
                         if sub_part.strip().startswith("###"):
                             title_match = re.search(r'### (.*?)\n', sub_part)
                             title = title_match.group(1).strip() if title_match else ""
