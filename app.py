@@ -27,24 +27,23 @@ if not os.path.exists("history"):
 # -----------------------------------------------------------------
 # プロンプトの定義
 # -----------------------------------------------------------------
-PROMPTS = {
+PROMPT_TEMPLATES = {
     "総合家庭教師": """
 あなたは、生徒の知的好奇心を引き出すのが得意な、非常に優秀な家庭教師です。
 生徒からの質問に対して、必ず以下の形式で回答してください。
+回答のレベルは、対象となる {target_age} が理解できるように調整してください。
 - プロセスの説明など図解が必要な場合は、その図をMermaid記法で記述し、必ず```mermaid```と```で囲んだコードブロックにしてください。
 - 数式を記述する場合は、必ず`$$数式$$`の形式でLaTeX記法を使用してください。
 - グラフを表示する場合は、必ず```json```ブロックを使い、厳密なVega-Lite仕様のJSON形式で記述してください。
 
+
 ---
 ### 基本的な回答
-ここに、質問に対する答えを中学生にも分かるように簡潔に説ｓｓ明してください。
+ここに、質問に対する答えを、{target_age} にも分かるように簡潔に説明してください。
 
 ### 深掘りのための問いかけ
-生徒が次の一歩を踏み出したくなるように、魅力的な問いかけを3つ提案してください。
-例:
-1. なぜ植物だけが光合成をできるのか、その秘密についてもっと知りたい？
-2. もし地球に太陽の光が当たらなくなったら、生物はどうなるか、一緒に考えてみない？
-3. 光合成以外にも、生物がエネルギーを作り出す面白い方法があるんだけど、聞いてみたい？
+{target_age} が次の一歩を踏み出したくなるように、魅力的な問いかけを3つ提案してください。
+問いかけは、{target_age} の生徒の好奇心を刺激するような内容にしてください。
 
 ### 参考サイト
 回答内容より詳しい情報がわかる信頼性の高いWebページへのリンクを、Markdown形式で最大5つまで提示し、簡単にそのサイトの説明をしてください。
@@ -60,24 +59,23 @@ PROMPTS = {
     "科学者": """
 あなたは、複雑な科学の概念を簡単な言葉で説明するのが得意な科学者です。
 生徒からの質問に対して、必ず以下の形式で回答してください。
+回答のレベルは、対象となる {target_age} が理解できるように調整してください。
 - 科学的なプロセスや関係性を図解する場合は、その図をMermaid記法で記述し、必ず```mermaid```と```で囲んだコードブロックにしてください。
 - 物理法則や化学反応式を示す場合は、必ず`$$数式$$`の形式でLaTeX記法を使用してください。
-- 実験データなどをグラフで示す場合は、必ず```json```ブロックを使い、厳密なVega-Lite仕様のJSON形式で記述してください。
-
 ---
 ### ズバリ！要点はこれ
-ここに、科学的な質問に対する核心を、比喩や身近な例を使って一言で説明してください。
+ここに、科学的な質問に対する核心を、比喩や身近な例を使って、{target_age} にも分かるように説明してください。
 
 ### 実験してみよう！
-知的好奇心を刺激するような、驚きのある問いかけを3つ提案してください。
-例:
-1. この原理を使えば、家にあるものでモーターが作れるんだけど、挑戦してみたくない？
-2. この技術が、100年後の未来をどう変えているか、想像するだけでワクワクしない？
-3. 実は、この分野でまだ誰も解けていない大きな謎があるんだけど、その謎に挑戦してみる？
+{target_age} の知的好奇心を刺激するような、驚きのある問いかけを3つ提案してください。
 
 ### 参考にしたページ
 このテーマについて、より専門的で正確な情報が得られる信頼性の高いWebページへのリンクを、Markdown形式で最大3つまで提示してください。
 ---
+
+### 関連する専門用語
+回答内容に関連する専門用語や、より深く知るためのキーワードを3つ提示してください。
+
 """,
     "歴史探求家": """
 あなたは、歴史上の出来事の背景や人物像を生き生きと語るのが得意な歴史探求家です。
@@ -196,21 +194,36 @@ def render_text_and_naked_mermaid(text, message_index):
 # -----------------------------------------------------------------
 if "messages" not in st.session_state:
     st.session_state.messages = []
-
+if "selected_mode" not in st.session_state:
+    st.session_state.selected_mode = "総合家庭教師"
+if "target_age" not in st.session_state:
+    st.session_state.target_age = "中学生" # デフォルト値を設定
 # -----------------------------------------------------------------
 # サイドバー
 # -----------------------------------------------------------------
 with st.sidebar:
     st.title("オプション")
     
-    current_mode_index = list(PROMPTS.keys()).index(st.session_state.get("selected_mode", "総合家庭教師"))
-    selected_mode = st.selectbox("AI先生の役割を選んでください", list(PROMPTS.keys()), index=current_mode_index)
-    if st.session_state.get("selected_mode") != selected_mode:
+    # モード選択
+    current_mode = st.session_state.selected_mode
+    selected_mode = st.selectbox("AI先生の役割を選んでください", list(PROMPT_TEMPLATES.keys()), index=list(PROMPT_TEMPLATES.keys()).index(current_mode))
+    
+    # ★★★ ここからが新しいコード ★★★
+    # 対象年齢選択
+    age_options = ["小学生（低学年）", "小学生（高学年）", "中学生", "高校生", "社会人"]
+    current_age = st.session_state.target_age
+    selected_age = st.selectbox("対象年齢を選んでください", age_options, index=age_options.index(current_age))
+    # ★★★ ここまでが新しいコード ★★★
+
+    # モードまたは年齢が変更されたら、会話をリセット
+    if selected_mode != current_mode or selected_age != current_age:
         st.session_state.selected_mode = selected_mode
+        st.session_state.target_age = selected_age
         st.session_state.messages = []
         st.session_state.chat = None
         if "chat_session_id" in st.session_state:
             del st.session_state.chat_session_id
+        st.rerun()
     
     if st.button("新しい会話を始める"):
         st.session_state.clear()
@@ -241,10 +254,12 @@ with st.sidebar:
 # モデルとチャットの初期化
 # -----------------------------------------------------------------
 if "chat" not in st.session_state or st.session_state.chat is None:
-    system_prompt = PROMPTS[st.session_state.get("selected_mode", "総合家庭教師")]
+    # 選択されたモードと年齢層から、最終的なシステムプロンプトを生成
+    prompt_template = PROMPT_TEMPLATES[st.session_state.selected_mode]
+    system_prompt = prompt_template.format(target_age=st.session_state.target_age)
+    
     model = genai.GenerativeModel('gemini-1.5-flash', system_instruction=system_prompt)
     st.session_state.chat = model.start_chat(history=[{"role": msg["role"], "parts": [msg["content"]]} for msg in st.session_state.get("messages", [])])
-
 # -----------------------------------------------------------------
 # メイン画面
 # -----------------------------------------------------------------
