@@ -37,7 +37,7 @@ PROMPTS = {
 
 ---
 ### 基本的な回答
-ここに、質問に対する答えを中学生にも分かるように簡潔に説明してください。
+ここに、質問に対する答えを中学生にも分かるように簡潔に説ｓｓ明してください。
 
 ### 深掘りのための問いかけ
 生徒が次の一歩を踏み出したくなるように、魅力的な問いかけを3つ提案してください。
@@ -46,10 +46,11 @@ PROMPTS = {
 2. もし地球に太陽の光が当たらなくなったら、生物はどうなるか、一緒に考えてみない？
 3. 光合成以外にも、生物がエネルギーを作り出す面白い方法があるんだけど、聞いてみたい？
 
-### 参考にしたページ
-回答内容の根拠や、より詳しい情報がわかる信頼性の高いWebページへのリンクを、Markdown形式で最大3つまで提示してください。
+### 参考サイト
+回答内容より詳しい情報がわかる信頼性の高いWebページへのリンクを、Markdown形式で最大5つまで提示し、簡単にそのサイトの説明をしてください。
 
 ### 関連キーワード
+質生徒が興味を惹きそうな質問と回答に関連するキーワードを提示してください。明らかに生徒が知っていそうなキーワードは省略してください。
 - キーワード1
 - キーワード2
 - キーワード3
@@ -96,6 +97,12 @@ PROMPTS = {
 ### 参考にしたページ
 回答の元になった、あるいは関連する資料や論文、博物館の解説ページなど、信頼できる情報源へのリンクをMarkdown形式で最大3つまで提示してください。
 ---
+
+### 関連キーワード
+- キーワード1
+- キーワード2
+- キーワード3
+
 """
 }
 
@@ -124,7 +131,6 @@ def delete_history(filename):
     if st.session_state.get("chat_session_id") == filename:
         del st.session_state.chat_session_id
 
-# ★★★ ここからが新しい、表示処理のための関数 ★★★
 def render_model_response(text, message_index):
     # 特殊ブロック（箱入り）を先に探し出して分離する
     parts = re.split(r'(```json\n.*?\n```|```mermaid\n.*?\n```|\$\$.*?\$\$)', text, flags=re.DOTALL | re.IGNORECASE)
@@ -154,15 +160,12 @@ def render_model_response(text, message_index):
             render_text_and_naked_mermaid(part, message_index)
 
 def render_text_and_naked_mermaid(text, message_index):
-    # テキストの中から、裸のMermaidコードを探して分離する
     parts = re.split(r'((?:graph|flowchart|sequenceDiagram|gantt|pie|timeline|mindmap)(?:.|\n)*)', text, flags=re.IGNORECASE)
     for i, part in enumerate(parts):
         if not part.strip(): continue
-        # Mermaidコードの開始キーワードで始まるかチェック
-        if i % 2 == 1: # re.splitでキャプチャグループにマッチした部分
+        if i % 2 == 1:
             st.markdown(f"```mermaid\n{part.strip()}\n```")
         else:
-            # 残ったテキストを、さらに###セクションで分割
             sub_parts = re.split(r'(### (?:.*?)\n(?:.|\n)*?(?=\n###|\Z))', part)
             for sub_part in sub_parts:
                 if not sub_part.strip(): continue
@@ -171,17 +174,22 @@ def render_text_and_naked_mermaid(text, message_index):
                     title = title_match.group(1).strip() if title_match else ""
                     content = sub_part[len(title)+5:].strip()
                     st.markdown(f"#### {title}")
-
                     if "深掘り" in title or "分岐点" in title or "実験" in title:
                         questions = [q.strip() for q in content.split('\n') if q.strip()]
                         for q_text in questions:
                             question_to_ask = re.sub(r'^\d+\.\s*', '', q_text)
                             st.button(question_to_ask, key=f"btn_{message_index}_{q_text}", on_click=set_question_from_button, args=(question_to_ask,))
+                    elif "キーワード" in title or "登場人物" in title or "専門用語" in title:
+                        keywords = [kw.strip().lstrip('*- ').strip() for kw in content.split('\n') if kw.strip()]
+                        for keyword in keywords:
+                            if not keyword: continue
+                            question_to_ask = f"{keyword}について、もっと詳しく教えてください。"
+                            st.button(keyword, key=f"kw_btn_{message_index}_{keyword}", on_click=set_question_from_button, args=(question_to_ask,))
                     else:
                         st.markdown(content)
                 else:
                     st.markdown(sub_part)
-# ★★★ ここまでが新しい関数 ★★★
+
 
 # -----------------------------------------------------------------
 # セッション状態の初期化
