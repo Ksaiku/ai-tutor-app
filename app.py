@@ -7,7 +7,7 @@ import re
 import os
 import json
 from datetime import datetime
-from urllib.parse import quote
+import trafilatura
 
 # -----------------------------------------------------------------
 # 初期設定
@@ -30,6 +30,14 @@ if not os.path.exists("history"):
 PROMPT_TEMPLATES = {
     "総合家庭教師": """
 あなたは、生徒の知的好奇心を引き出すのが得意な、非常に優秀な家庭教師です。
+
+【最重要】
+生徒は以下の『参考文章』を読んでいます。あなたの回答は、必ずこの文章の内容に基づいてください。
+『参考文章』：
+---
+{document_context}
+---
+
 生徒からの質問に対して、必ず以下の形式で回答してください。
 回答のレベルは、対象となる {target_age} が理解できるように調整してください。
 - プロセスの説明など図解が必要な場合は、その図をMermaid記法で記述し、必ず```mermaid```と```で囲んだコードブロックにしてください。
@@ -62,6 +70,14 @@ PROMPT_TEMPLATES = {
 """,
     "科学者": """
 あなたは、複雑な科学の概念を簡単な言葉で説明するのが得意な科学者です。
+
+【最重要】
+生徒は以下の『参考文章』を読んでいます。あなたの回答は、必ずこの文章の内容に基づいてください。
+『参考文章』：
+---
+{document_context}
+---
+
 生徒からの質問に対して、必ず以下の形式で回答してください。
 回答のレベルは、対象となる {target_age} が理解できるように調整してください。
 - 科学的なプロセスや関係性を図解する場合は、その図をMermaid記法で記述し、必ず```mermaid```と```で囲んだコードブロックにしてください。
@@ -89,6 +105,14 @@ PROMPT_TEMPLATES = {
 """,
     "歴史探求家": """
 あなたは、歴史上の出来事の背景や人物像を生き生きと語るのが得意な歴史探求家です。
+
+【最重要】
+生徒は以下の『参考文章』を読んでいます。あなたの回答は、必ずこの文章の内容に基づいてください。
+『参考文章』：
+---
+{document_context}
+---
+
 生徒からの質問に対して、必ず以下の形式で、物語を語るように情熱的に回答してください。
 - 出来事の因果関係など、複雑な関係性を図解する場合は、その図をMermaid記法で記述し、必ず```mermaid```と```で囲んだコードブロックにしてください。
 
@@ -120,24 +144,30 @@ PROMPT_TEMPLATES = {
 """
 }
 
-# (これ以降の関数定義やサイドバーなどのコードは、前回から変更ありません)
-# (以下、完全なコードです)
-
 # -----------------------------------------------------------------
 # 関数定義
 # -----------------------------------------------------------------
+@st.cache_data(ttl=3600)
+def get_website_text(url):
+    try:
+        downloaded = trafilatura.fetch_url(url)
+        if downloaded:
+            return trafilatura.extract(downloaded, include_comments=False, include_tables=True)
+        else:
+            st.error("URLからコンテンツをダウンロードできませんでした。")
+            return None
+    except Exception as e:
+        st.error(f"URLの処理中にエラーが発生しました: {e}")
+        return None
+
 def add_to_known_keywords(keyword):
-    """知識ノートにキーワードを追加する"""
-    if "known_keywords" not in st.session_state:
-        st.session_state.known_keywords = []
-    
-    # 重複を避けて追加
-    if keyword and keyword not in st.session_state.known_keywords:
-        st.session_state.known_keywords.append(keyword)
-        st.toast(f"✅ 「{keyword}」を知識ノートに記録しました！")
+    if "known_keywords" not in st.session_state: st.session_state.known_keywords = []
+    clean_keyword = keyword.strip()
+    if clean_keyword and clean_keyword not in st.session_state.known_keywords:
+        st.session_state.known_keywords.append(clean_keyword)
 
 def handle_new_question(question):
-    add_to_known_keywords(question.replace("について、もっと詳しく教えてください。", "")) # 質問文からもキーワードを記録
+    add_to_known_keywords(question.replace("について、もっと詳しく教えてください。", "").replace("について教えて", "").strip())
     st.session_state.messages.append({"role": "user", "content": question})
     try:
         response = st.session_state.chat.send_message(question)
@@ -145,29 +175,48 @@ def handle_new_question(question):
     except Exception as e:
         st.error(f"AIとの通信中にエラーが発生しました: {e}")
 
-
 def set_question_from_button(question, keyword):
     st.session_state.clicked_question = question
     add_to_known_keywords(keyword)
 
-
 def delete_history(filename):
     filepath = os.path.join("history", filename)
-    if os.path.exists(filepath):
-        os.remove(filepath)
+    if os.path.exists(filepath): os.remove(filepath)
     st.toast(f"履歴「{filename}」を削除しました。")
-    if st.session_state.get("chat_session_id") == filename:
-        del st.session_state.chat_session_id
+    if st.session_state.get("chat_session_id") == filename: del st.session_state.chat_session_id
+
+def render_text_and_buttons(text, message_index):
+    sub_parts = re.split(r'(### (?:.*?)\n(?:.|\n)*?(?=\n###|\Z))', text)
+    for sub_part in sub_parts:
+        if not sub_part.strip(): continue
+        if sub_part.strip().startswith("###"):
+            title_match = re.search(r'### (.*?)\n', sub_part)
+            title = title_match.group(1).strip() if title_match else ""
+            content = sub_part[len(title)+5:].strip()
+            st.markdown(f"#### {title}")
+
+            if "深掘り" in title or "分岐点" in title or "実験" in title:
+                questions = [q.strip() for q in content.split('\n') if q.strip()]
+                for q_text in questions:
+                    question_to_ask = re.sub(r'^\d+\.\s*', '', q_text)
+                    st.button(question_to_ask, key=f"btn_{message_index}_{q_text}", on_click=set_question_from_button, args=(question_to_ask, question_to_ask))
+            
+            elif "キーワード" in title or "登場人物" in title or "専門用語" in title:
+                keywords = [kw.strip().lstrip('*- ').strip() for kw in content.split('\n') if kw.strip()]
+                for keyword in keywords:
+                    if not keyword: continue
+                    question_to_ask = f"{keyword}について、もっと詳しく教えてください。"
+                    st.button(keyword, key=f"kw_btn_{message_index}_{keyword}", on_click=set_question_from_button, args=(question_to_ask, keyword))
+            else:
+                st.markdown(content)
+        else:
+            st.markdown(sub_part)
 
 def render_model_response(text, message_index):
-    # 特殊ブロック（箱入り）を先に探し出して分離する
     parts = re.split(r'(```json\n.*?\n```|```mermaid\n.*?\n```|\$\$.*?\$\$)', text, flags=re.DOTALL | re.IGNORECASE)
-    
     for part in parts:
         if not part.strip(): continue
-        
         part_lower = part.strip().lower()
-        # 特殊ブロックの処理
         if part_lower.startswith('```json'):
             json_code = part.strip().lstrip('```json').rstrip('```')
             try:
@@ -184,79 +233,43 @@ def render_model_response(text, message_index):
             latex_code = part.strip().strip('$$')
             st.latex(latex_code)
         else:
-            # 残りのテキスト部分を処理
-            render_text_and_naked_mermaid(part, message_index)
+            render_text_and_buttons(part, message_index)
 
-def render_text_and_naked_mermaid(text, message_index):
-    parts = re.split(r'((?:graph|flowchart|sequenceDiagram|gantt|pie|timeline|mindmap)(?:.|\n)*)', text, flags=re.IGNORECASE)
-    for i, part in enumerate(parts):
-        if not part.strip(): continue
-        if i % 2 == 1:
-            st.markdown(f"```mermaid\n{part.strip()}\n```")
-        else:
-            sub_parts = re.split(r'(### (?:.*?)\n(?:.|\n)*?(?=\n###|\Z))', part)
-            for sub_part in sub_parts:
-                if not sub_part.strip(): continue
-                if sub_part.strip().startswith("###"):
-                    title_match = re.search(r'### (.*?)\n', sub_part)
-                    title = title_match.group(1).strip() if title_match else ""
-                    content = sub_part[len(title)+5:].strip()
-                    st.markdown(f"#### {title}")
-                    if "深掘り" in title or "分岐点" in title or "実験" in title:
-                        questions = [q.strip() for q in content.split('\n') if q.strip()]
-                        for q_text in questions:
-                            question_to_ask = re.sub(r'^\d+\.\s*', '', q_text)
-                            st.button(question_to_ask, key=f"btn_{message_index}_{q_text}", on_click=set_question_from_button, args=(question_to_ask, question_to_ask))
-                    elif "キーワード" in title or "登場人物" in title or "専門用語" in title:
-                        keywords = [kw.strip().lstrip('*- ').strip() for kw in content.split('\n') if kw.strip()]
-                        for keyword in keywords:
-                            if not keyword: continue
-                            question_to_ask = f"{keyword}について、もっと詳しく教えてください。"
-                            st.button(keyword, key=f"kw_btn_{message_index}_{keyword}", on_click=set_question_from_button, args=(question_to_ask, keyword))
-                    else:
-                        st.markdown(content)
-                else:
-                    st.markdown(sub_part)
 
 
 # -----------------------------------------------------------------
 # セッション状態の初期化
 # -----------------------------------------------------------------
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "selected_mode" not in st.session_state:
-    st.session_state.selected_mode = "総合家庭教師"
-if "target_age" not in st.session_state:
-    st.session_state.target_age = "中学生"
-if "known_keywords" not in st.session_state:
-    st.session_state.known_keywords = []
+if "messages" not in st.session_state: st.session_state.messages = []
+if "selected_mode" not in st.session_state: st.session_state.selected_mode = "総合家庭教師"
+if "target_age" not in st.session_state: st.session_state.target_age = "中学生"
+if "known_keywords" not in st.session_state: st.session_state.known_keywords = []
+if "document_context" not in st.session_state: st.session_state.document_context = ""
 
 # -----------------------------------------------------------------
 # サイドバー
 # -----------------------------------------------------------------
 with st.sidebar:
-    
-    # ★★★ ここからが修正箇所 ★★★
-
-    # 新しい会話を始めるボタン
     if st.button("新しい会話を始める", use_container_width=True):
-        # 知識ノート以外の会話に関するセッション情報のみをリセット
-        keys_to_clear = ["messages", "chat", "chat_session_id", "suggested_filename", "show_save_dialog"]
+        keys_to_clear = ["messages", "chat", "chat_session_id", "document_context"]
         for key in keys_to_clear:
-            if key in st.session_state:
-                del st.session_state[key]
+            if key in st.session_state: del st.session_state[key]
         st.rerun()
-
-    st.markdown("---") 
-
-    # モードと年齢選択
+    st.markdown("---")
     st.subheader("設定")
-    current_mode_index = list(PROMPT_TEMPLATES.keys()).index(st.session_state.get("selected_mode", "総合家庭教師"))
-    selected_mode = st.selectbox("AI先生の役割", list(PROMPT_TEMPLATES.keys()), index=current_mode_index)
-    
+    current_mode = st.session_state.selected_mode
+    selected_mode = st.selectbox("AI先生の役割", list(PROMPT_TEMPLATES.keys()), index=list(PROMPT_TEMPLATES.keys()).index(current_mode))
     age_options = ["小学生（低学年）", "小学生（高学年）", "中学生", "高校生", "社会人・専門家"]
-    current_age_index = age_options.index(st.session_state.get("target_age", "中学生"))
-    selected_age = st.selectbox("対象年齢", age_options, index=current_age_index)
+    current_age = st.session_state.target_age
+    selected_age = st.selectbox("対象年齢", age_options, index=age_options.index(current_age))
+
+    if selected_mode != current_mode or selected_age != current_age:
+        st.session_state.selected_mode = selected_mode
+        st.session_state.target_age = selected_age
+        st.session_state.messages = []
+        st.session_state.chat = None
+        if "chat_session_id" in st.session_state: del st.session_state.chat_session_id
+        st.rerun()
 
     # モードまたは年齢が変更されたら、会話のみをリセット
     if st.session_state.get("selected_mode") != selected_mode or st.session_state.get("target_age") != selected_age:
@@ -295,72 +308,98 @@ with st.sidebar:
         st.write(st.session_state.known_keywords)
     else:
         st.write("まだありません。")
-
 # -----------------------------------------------------------------
-# モデルとチャットの初期化
+# メイン画面 - ヘッダーとURL入力
 # -----------------------------------------------------------------
-if "chat" not in st.session_state or st.session_state.chat is None:
-    prompt_template = PROMPT_TEMPLATES[st.session_state.selected_mode]
-    known_keywords_str = ", ".join(st.session_state.known_keywords) if st.session_state.known_keywords else "なし"
-    
-    system_prompt = prompt_template.format(
-        target_age=st.session_state.target_age,
-        known_keywords=known_keywords_str
-    )
-    
-    model = genai.GenerativeModel('gemini-1.5-flash', system_instruction=system_prompt)
-    st.session_state.chat = model.start_chat(history=[{"role": msg["role"], "parts": [msg["content"]]} for msg in st.session_state.get("messages", [])])
+st.title("深掘り支援AI - 資料と対話する学習室")
+url = st.text_input("学習したいWebサイトのURLを入力してください", "")
+if st.button("URLを読み込む"):
+    if url:
+        with st.spinner("Webサイトを読み込んでいます..."):
+            content = get_website_text(url)
+            if content:
+                st.session_state.document_context = content
+                st.session_state.messages = [] 
+                st.session_state.chat = None
+                st.success("読み込みが完了しました。")
+    else:
+        st.warning("URLを入力してください。")
 
-# -----------------------------------------------------------------
-# メイン画面
-# -----------------------------------------------------------------
-st.title("深掘り支援AI")
-st.info(f"現在のモード: **{st.session_state.get('selected_mode', '総合家庭教師')}**")
+st.markdown("---")
+col1, col2 = st.columns([2, 1])
 
-question = st.session_state.pop("clicked_question", None) or st.chat_input("AI先生に質問してみよう")
+# --- 左側：資料表示エリア ---
+with col1:
+    st.subheader("読み込んだ資料")
+    if st.session_state.document_context:
+        with st.container(height=800):
+            st.markdown(st.session_state.document_context)
+    else:
+        st.info("ここに、読み込んだWebサイトの内容が表示されます。")
 
-if question:
-    handle_new_question(question)
-    st.rerun()
+# --- 右側：チャットエリア ---
+with col2:
+    st.subheader(f"AI先生との対話")
+    st.info(f"モード: {st.session_state.selected_mode} | 対象: {st.session_state.target_age}")
 
-# --- メインの表示ロジック ---
-for i, message in enumerate(st.session_state.messages):
-    role = "あなた" if message["role"] == "user" else "AI先生"
-    with st.chat_message(role):
-        if message["role"] == "model":
-            render_model_response(message["content"], i) # 新しい表示関数を呼び出し
-        else:
-            st.markdown(message["content"])
+    if "chat" not in st.session_state or st.session_state.chat is None:
+        prompt_template = PROMPT_TEMPLATES[st.session_state.selected_mode]
+        known_keywords_str = ", ".join(st.session_state.known_keywords) if st.session_state.known_keywords else "なし"
+        document_context_str = st.session_state.document_context if st.session_state.document_context else "今回はありません"
+        
+        system_prompt = prompt_template.format(
+            target_age=st.session_state.target_age,
+            known_keywords=known_keywords_str,
+            document_context=document_context_str
+        )
+        
+        model = genai.GenerativeModel('gemini-1.5-flash', system_instruction=system_prompt)
+        st.session_state.chat = model.start_chat(history=[])
+
+    question = st.session_state.pop("clicked_question", None) or st.chat_input("資料について質問してみよう")
+    if question:
+        handle_new_question(question)
+        st.rerun()
+
+    with st.container(height=700):
+        for i, message in enumerate(st.session_state.messages):
+            with st.chat_message(message["role"]):
+                if message["role"] == "model":
+                    # ★★★ ここで、以前の多機能な表示関数を呼び出します ★★★
+                    render_model_response(message["content"], i)
+                else:
+                    st.markdown(message["content"])
+
 
 # --- 会話保存機能 ---
-if st.session_state.messages:
-    if st.button("現在の会話を保存する", key="show_save_dialog_btn"):
-        st.session_state.show_save_dialog = True
-    
-    if st.session_state.get("show_save_dialog"):
-        with st.form("save_form"):
-            if "suggested_filename" not in st.session_state:
-                with st.spinner("AIがファイル名を考えています..."):
-                    summary_prompt = "この会話のトピックを要約し、ファイル名として最適な日本語のタイトルを10文字以内で提案してください。タイトルのみを返答してください。"
-                    try:
-                        summary_response = st.session_state.chat.send_message(summary_prompt)
-                        st.session_state.suggested_filename = re.sub(r'[\\/*?:"<>|]', "", summary_response.text.strip())
-                    except Exception:
-                        st.session_state.suggested_filename = "会話の要約"
-            
-            filename_to_save = st.text_input("ファイル名", value=st.session_state.suggested_filename)
-            submitted = st.form_submit_button("確定して保存")
+    if st.session_state.messages:
+        if st.button("現在の会話を保存する", key="show_save_dialog_btn"):
+            st.session_state.show_save_dialog = True
+        
+        if st.session_state.get("show_save_dialog"):
+            with st.form("save_form"):
+                if "suggested_filename" not in st.session_state:
+                    with st.spinner("AIがファイル名を考えています..."):
+                        summary_prompt = "この会話のトピックを要約し、ファイル名として最適な日本語のタイトルを10文字以内で提案してください。タイトルのみを返答してください。"
+                        try:
+                            summary_response = st.session_state.chat.send_message(summary_prompt)
+                            st.session_state.suggested_filename = re.sub(r'[\\/*?:"<>|]', "", summary_response.text.strip())
+                        except Exception:
+                            st.session_state.suggested_filename = "会話の要約"
+                
+                filename_to_save = st.text_input("ファイル名", value=st.session_state.suggested_filename)
+                submitted = st.form_submit_button("確定して保存")
 
-            if submitted:
-                filepath = os.path.join("history", f"{filename_to_save}.json")
-                data_to_save = { "mode": st.session_state.selected_mode, "messages": st.session_state.messages }
-                with open(filepath, "w", encoding="utf-8") as f:
-                    json.dump(data_to_save, f, ensure_ascii=False, indent=2)
-                
-                st.success(f"会話を保存しました: {filename_to_save}.json")
-                st.toast("✅ 保存完了！")
-                
-                del st.session_state.show_save_dialog
-                if "suggested_filename" in st.session_state:
-                    del st.session_state.suggested_filename
-                st.rerun()
+                if submitted:
+                    filepath = os.path.join("history", f"{filename_to_save}.json")
+                    data_to_save = { "mode": st.session_state.selected_mode, "messages": st.session_state.messages }
+                    with open(filepath, "w", encoding="utf-8") as f:
+                        json.dump(data_to_save, f, ensure_ascii=False, indent=2)
+                    
+                    st.success(f"会話を保存しました: {filename_to_save}.json")
+                    st.toast("✅ 保存完了！")
+                    
+                    del st.session_state.show_save_dialog
+                    if "suggested_filename" in st.session_state:
+                        del st.session_state.suggested_filename
+                    st.rerun()
