@@ -36,6 +36,10 @@ PROMPT_TEMPLATES = {
 - 数式を記述する場合は、必ず`$$数式$$`の形式でLaTeX記法を使用してください。
 - グラフを表示する場合は、必ず```json```ブロックを使い、厳密なVega-Lite仕様のJSON形式で記述してください。
 
+【重要】
+この生徒は、以下のトピックについては既に基本的な知識があります。
+既知のトピックリスト: [{known_keywords}]
+これらのトピックの基本的な説明は省略し、今回の質問との関連性や、より発展的な内容を中心に回答してください。もしリストが空の場合は、基本的な内容から説明してください。
 
 ---
 ### 基本的な回答
@@ -62,6 +66,12 @@ PROMPT_TEMPLATES = {
 回答のレベルは、対象となる {target_age} が理解できるように調整してください。
 - 科学的なプロセスや関係性を図解する場合は、その図をMermaid記法で記述し、必ず```mermaid```と```で囲んだコードブロックにしてください。
 - 物理法則や化学反応式を示す場合は、必ず`$$数式$$`の形式でLaTeX記法を使用してください。
+
+【重要】
+この生徒は、以下のトピックについては既に基本的な知識があります。
+既知のトピックリスト: [{known_keywords}]
+これらのトピックの基本的な説明は省略し、今回の質問との関連性や、より発展的な内容を中心に回答してください。もしリストが空の場合は、基本的な内容から説明してください。
+
 ---
 ### ズバリ！要点はこれ
 ここに、科学的な質問に対する核心を、比喩や身近な例を使って、{target_age} にも分かるように説明してください。
@@ -81,6 +91,12 @@ PROMPT_TEMPLATES = {
 あなたは、歴史上の出来事の背景や人物像を生き生きと語るのが得意な歴史探求家です。
 生徒からの質問に対して、必ず以下の形式で、物語を語るように情熱的に回答してください。
 - 出来事の因果関係など、複雑な関係性を図解する場合は、その図をMermaid記法で記述し、必ず```mermaid```と```で囲んだコードブロックにしてください。
+
+【重要】
+この生徒は、以下のトピックについては既に基本的な知識があります。
+既知のトピックリスト: [{known_keywords}]
+これらのトピックの基本的な説明は省略し、今回の質問との関連性や、より発展的な内容を中心に回答してください。もしリストが空の場合は、基本的な内容から説明してください。
+
 
 ---
 ### 物語の幕開け
@@ -110,7 +126,18 @@ PROMPT_TEMPLATES = {
 # -----------------------------------------------------------------
 # 関数定義
 # -----------------------------------------------------------------
+def add_to_known_keywords(keyword):
+    """知識ノートにキーワードを追加する"""
+    if "known_keywords" not in st.session_state:
+        st.session_state.known_keywords = []
+    
+    # 重複を避けて追加
+    if keyword and keyword not in st.session_state.known_keywords:
+        st.session_state.known_keywords.append(keyword)
+        st.toast(f"✅ 「{keyword}」を知識ノートに記録しました！")
+
 def handle_new_question(question):
+    add_to_known_keywords(question.replace("について、もっと詳しく教えてください。", "")) # 質問文からもキーワードを記録
     st.session_state.messages.append({"role": "user", "content": question})
     try:
         response = st.session_state.chat.send_message(question)
@@ -118,8 +145,11 @@ def handle_new_question(question):
     except Exception as e:
         st.error(f"AIとの通信中にエラーが発生しました: {e}")
 
-def set_question_from_button(question):
+
+def set_question_from_button(question, keyword):
     st.session_state.clicked_question = question
+    add_to_known_keywords(keyword)
+
 
 def delete_history(filename):
     filepath = os.path.join("history", filename)
@@ -176,13 +206,13 @@ def render_text_and_naked_mermaid(text, message_index):
                         questions = [q.strip() for q in content.split('\n') if q.strip()]
                         for q_text in questions:
                             question_to_ask = re.sub(r'^\d+\.\s*', '', q_text)
-                            st.button(question_to_ask, key=f"btn_{message_index}_{q_text}", on_click=set_question_from_button, args=(question_to_ask,))
+                            st.button(question_to_ask, key=f"btn_{message_index}_{q_text}", on_click=set_question_from_button, args=(question_to_ask, question_to_ask))
                     elif "キーワード" in title or "登場人物" in title or "専門用語" in title:
                         keywords = [kw.strip().lstrip('*- ').strip() for kw in content.split('\n') if kw.strip()]
                         for keyword in keywords:
                             if not keyword: continue
                             question_to_ask = f"{keyword}について、もっと詳しく教えてください。"
-                            st.button(keyword, key=f"kw_btn_{message_index}_{keyword}", on_click=set_question_from_button, args=(question_to_ask,))
+                            st.button(keyword, key=f"kw_btn_{message_index}_{keyword}", on_click=set_question_from_button, args=(question_to_ask, keyword))
                     else:
                         st.markdown(content)
                 else:
@@ -197,40 +227,49 @@ if "messages" not in st.session_state:
 if "selected_mode" not in st.session_state:
     st.session_state.selected_mode = "総合家庭教師"
 if "target_age" not in st.session_state:
-    st.session_state.target_age = "中学生" # デフォルト値を設定
+    st.session_state.target_age = "中学生"
+if "known_keywords" not in st.session_state:
+    st.session_state.known_keywords = []
+
 # -----------------------------------------------------------------
 # サイドバー
 # -----------------------------------------------------------------
 with st.sidebar:
-    st.title("オプション")
     
-    # モード選択
-    current_mode = st.session_state.selected_mode
-    selected_mode = st.selectbox("AI先生の役割を選んでください", list(PROMPT_TEMPLATES.keys()), index=list(PROMPT_TEMPLATES.keys()).index(current_mode))
-    
-    # ★★★ ここからが新しいコード ★★★
-    # 対象年齢選択
-    age_options = ["小学生（低学年）", "小学生（高学年）", "中学生", "高校生", "社会人"]
-    current_age = st.session_state.target_age
-    selected_age = st.selectbox("対象年齢を選んでください", age_options, index=age_options.index(current_age))
-    # ★★★ ここまでが新しいコード ★★★
+    # ★★★ ここからが修正箇所 ★★★
 
-    # モードまたは年齢が変更されたら、会話をリセット
-    if selected_mode != current_mode or selected_age != current_age:
+    # 新しい会話を始めるボタン
+    if st.button("新しい会話を始める", use_container_width=True):
+        # 知識ノート以外の会話に関するセッション情報のみをリセット
+        keys_to_clear = ["messages", "chat", "chat_session_id", "suggested_filename", "show_save_dialog"]
+        for key in keys_to_clear:
+            if key in st.session_state:
+                del st.session_state[key]
+        st.rerun()
+
+    st.markdown("---") 
+
+    # モードと年齢選択
+    st.subheader("設定")
+    current_mode_index = list(PROMPT_TEMPLATES.keys()).index(st.session_state.get("selected_mode", "総合家庭教師"))
+    selected_mode = st.selectbox("AI先生の役割", list(PROMPT_TEMPLATES.keys()), index=current_mode_index)
+    
+    age_options = ["小学生（低学年）", "小学生（高学年）", "中学生", "高校生", "社会人・専門家"]
+    current_age_index = age_options.index(st.session_state.get("target_age", "中学生"))
+    selected_age = st.selectbox("対象年齢", age_options, index=current_age_index)
+
+    # モードまたは年齢が変更されたら、会話のみをリセット
+    if st.session_state.get("selected_mode") != selected_mode or st.session_state.get("target_age") != selected_age:
         st.session_state.selected_mode = selected_mode
         st.session_state.target_age = selected_age
+        # 知識ノートはリセットしない
         st.session_state.messages = []
         st.session_state.chat = None
-        if "chat_session_id" in st.session_state:
-            del st.session_state.chat_session_id
-        st.rerun()
-    
-    if st.button("新しい会話を始める"):
-        st.session_state.clear()
+        if "chat_session_id" in st.session_state: del st.session_state.chat_session_id
         st.rerun()
 
     st.markdown("---")
-    st.title("会話履歴")
+    st.subheader("会話履歴")
     history_files = sorted([f for f in os.listdir("history") if f.endswith(".json")], reverse=True)
 
     if not history_files:
@@ -240,26 +279,38 @@ with st.sidebar:
         col1, col2 = st.columns([0.8, 0.2])
         with col1:
             if st.button(filename, key=f"load_{filename}", use_container_width=True):
-                with open(os.path.join("history", filename), "r", encoding="utf-8") as f:
-                    chat_data = json.load(f)
+                with open(os.path.join("history", filename), "r", encoding="utf-8") as f: chat_data = json.load(f)
+                # 知識ノートも一緒に読み込む
                 st.session_state.clear()
-                st.session_state.messages = chat_data["messages"]
+                st.session_state.messages = chat_data.get("messages", [])
+                st.session_state.known_keywords = chat_data.get("known_keywords", [])
                 st.session_state.chat_session_id = filename
                 st.session_state.selected_mode = chat_data.get("mode", "総合家庭教師")
                 st.rerun()
-        with col2:
-            st.button("🗑️", key=f"delete_{filename}", on_click=delete_history, args=(filename,), use_container_width=True, help="この履歴を削除")
+        with col2: st.button("🗑️", key=f"delete_{filename}", on_click=delete_history, args=(filename,), use_container_width=True, help="この履歴を削除")
+    
+    st.markdown("---")
+    st.subheader("知識ノート")
+    if st.session_state.known_keywords:
+        st.write(st.session_state.known_keywords)
+    else:
+        st.write("まだありません。")
 
 # -----------------------------------------------------------------
 # モデルとチャットの初期化
 # -----------------------------------------------------------------
 if "chat" not in st.session_state or st.session_state.chat is None:
-    # 選択されたモードと年齢層から、最終的なシステムプロンプトを生成
     prompt_template = PROMPT_TEMPLATES[st.session_state.selected_mode]
-    system_prompt = prompt_template.format(target_age=st.session_state.target_age)
+    known_keywords_str = ", ".join(st.session_state.known_keywords) if st.session_state.known_keywords else "なし"
+    
+    system_prompt = prompt_template.format(
+        target_age=st.session_state.target_age,
+        known_keywords=known_keywords_str
+    )
     
     model = genai.GenerativeModel('gemini-1.5-flash', system_instruction=system_prompt)
     st.session_state.chat = model.start_chat(history=[{"role": msg["role"], "parts": [msg["content"]]} for msg in st.session_state.get("messages", [])])
+
 # -----------------------------------------------------------------
 # メイン画面
 # -----------------------------------------------------------------
